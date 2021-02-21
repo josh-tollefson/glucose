@@ -20,35 +20,48 @@ from statsmodels.tsa.arima_model import ARIMA
 warnings.filterwarnings("ignore", "statsmodels.tsa.arima_model.ARMA", FutureWarning)
 warnings.filterwarnings("ignore", "statsmodels.tsa.arima_model.ARIMA", FutureWarning)
 
+DATE = "DATE"
+HOUR = "HOUR"
+TIMESTAMP = "TIMESTAMP"
+TIME_DIFF = "TIME_DIFF"
+GLUCOSE_FIELD_ORIG = "Glucose Value (mg/dL)"
+GLUCOSE_FIELD_CORRECTED = "Glucose Value Corrected (mg/dL)"
+
 
 def read_csv(
-    infile, cols=[1, 7], skiprows=10, col_names=["Timestamp", "Glucose Value (mg/dL)"]
+    infile,
+    cols=[1, 7],
+    skiprows=10,
+    col_names=[TIMESTAMP, GLUCOSE_FIELD_ORIG],
 ):
+    # TODO(josh): to add docstring about the kind of file that expected here
 
     df = pd.read_csv(infile, usecols=cols, skiprows=skiprows)
     df.columns = col_names
-    df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+    df[TIMESTAMP] = pd.to_datetime(df[TIMESTAMP])
+    df[GLUCOSE_FIELD_CORRECTED] = df[GLUCOSE_FIELD_ORIG]
 
-    df["Glucose Value (mg/dL)"] = df["Glucose Value (mg/dL)"].replace({"Low": "40"})
-    df["Glucose Value (mg/dL)"] = df["Glucose Value (mg/dL)"].astype(int)
+    return df
 
-    # df = split_timestamp(df)
 
+def handle_lows(df):
+    df[GLUCOSE_FIELD_CORRECTED] = df[GLUCOSE_FIELD_ORIG].replace({"Low": "40"})
+    df[GLUCOSE_FIELD_CORRECTED] = df[GLUCOSE_FIELD_CORRECTED].astype(int)
     return df
 
 
 def split_timestamp(df):
 
-    df["Date"] = df["Timestamp"].dt.date
-    df["Hour"] = df["Timestamp"].dt.time
+    df[DATE] = df[TIMESTAMP].dt.date
+    df[HOUR] = df[TIMESTAMP].dt.time
 
     return df
 
 
 def get_lows(df, low_threshold=70):
 
-    df["Time Diff"] = (
-        pd.to_timedelta(df["Timestamp"].astype(str)).diff(-1).dt.total_seconds().div(60)
+    df[TIME_DIFF] = (
+        pd.to_timedelta(df[TIMESTAMP].astype(str)).diff(-1).dt.total_seconds().div(60)
     )
 
     print(df.head())
@@ -60,7 +73,7 @@ def create_labeled_data(df, num=10):
 
     for i in range(df.shape[0] // num):
 
-        if df["Glucose Value (mg/dL)"].iloc[i * num] <= 70:
+        if df[GLUCOSE_FIELD_CORRECTED].iloc[i * num] <= 70:
             label = 1
 
         else:
@@ -71,7 +84,7 @@ def create_labeled_data(df, num=10):
 
         else:
             row = np.append(
-                df["Glucose Value (mg/dL)"]
+                df[GLUCOSE_FIELD_CORRECTED]
                 .iloc[i * num - (6 + num) : i * num - 6]
                 .values,
                 label,
@@ -88,7 +101,7 @@ def create_labeled_data_two(df, num=10):
     labeled = pd.DataFrame(columns=names)
     for i in range(df.shape[0]):
 
-        if df["Glucose Value (mg/dL)"].iloc[i] <= 70:
+        if df[GLUCOSE_FIELD_CORRECTED].iloc[i] <= 70:
             label = 1
 
         else:
@@ -98,11 +111,11 @@ def create_labeled_data_two(df, num=10):
             pass
 
         else:
-            min_entry = df["Glucose Value (mg/dL)"].iloc[i - (6 + num) : i - 6].min()
-            max_entry = df["Glucose Value (mg/dL)"].iloc[i - (6 + num) : i - 6].max()
+            min_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - (6 + num) : i - 6].min()
+            max_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - (6 + num) : i - 6].max()
             diff_entry = (
-                df["Glucose Value (mg/dL)"].iloc[i - 6]
-                - df["Glucose Value (mg/dL)"].iloc[i - (6 + num)]
+                df[GLUCOSE_FIELD_CORRECTED].iloc[i - 6]
+                - df[GLUCOSE_FIELD_CORRECTED].iloc[i - (6 + num)]
             )
             row = [min_entry, max_entry, diff_entry, label]
             entry = pd.DataFrame(data=[row], columns=names)
@@ -256,9 +269,16 @@ def hyperparam_tuning(train_x, train_y, test_x, test_y, param_min, param_max):
 # plt.show()
 
 
-def main(infile="CLARITY_Export_2021-01-28_222148.csv"):
+def main(
+    infile="CLARITY_Export_2021-01-28_222148.csv",
+    split_timestamp=False,
+):
 
     df = read_csv(infile)
+    df = handle_lows(df)
+
+    if split_timestamp:
+        df = split_timestamp(df)
 
     # calculate a 60 day rolling mean and plot
 
@@ -280,6 +300,7 @@ def main(infile="CLARITY_Export_2021-01-28_222148.csv"):
 
     # hyperparam_tuning(x_res, y_res, test_x, test_y, 1, 100)
 
+    # TODO(hallacy): These results are pretty variable.  We should probably find the source of randomness
     model = LogisticRegression().fit(x_res, y_res)
 
     print(confusion_matrix(test_y, model.predict(test_x)))
