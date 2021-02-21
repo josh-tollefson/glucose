@@ -67,59 +67,57 @@ def get_lows(df, low_threshold=70):
     print(df.head())
 
 
-def create_labeled_data(df, num=10):
+# TODO(hallacy): Is there a more descriptive name
+def create_labeled_data(df, min_value=70, offset=6, width=10):
 
-    labeled = pd.DataFrame(columns=range(0, num + 1))
+    end = offset + width
+    labeled = pd.DataFrame(columns=range(0, width + 1))
 
-    for i in range(df.shape[0] // num):
+    for i in range(df.shape[0] // width):
+        if i * width < end:
+            continue
 
-        if df[GLUCOSE_FIELD_CORRECTED].iloc[i * num] <= 70:
+        if df[GLUCOSE_FIELD_CORRECTED].iloc[i * width] <= min_value:
             label = 1
 
         else:
             label = 0
 
-        if i * num < 6 + num:
-            pass
-
-        else:
-            row = np.append(
-                df[GLUCOSE_FIELD_CORRECTED]
-                .iloc[i * num - (6 + num) : i * num - 6]
-                .values,
-                label,
-            )
-            entry = pd.DataFrame(data=[row])
-            labeled = labeled.append(entry)
+        row = np.append(
+            df[GLUCOSE_FIELD_CORRECTED]
+            .iloc[i * width - end : i * width - offset]
+            .values,
+            label,
+        )
+        entry = pd.DataFrame(data=[row])
+        labeled = labeled.append(entry)
 
     return labeled
 
 
-def create_labeled_data_two(df, num=10):
-
+# TODO(hallacy): Is there a more descriptive name
+def create_min_max_labeled_data(df, min_value=70, offset=6, width=10):
+    # TODO(hallacy): Add docstring
+    # TODO(hallacy): these should be constants somewhere
     names = ["Min", "Max", "Diff", "Label"]
     labeled = pd.DataFrame(columns=names)
+
+    end = offset + width
     for i in range(df.shape[0]):
+        if i < end:
+            continue
 
-        if df[GLUCOSE_FIELD_CORRECTED].iloc[i] <= 70:
-            label = 1
+        label = 1 if df[GLUCOSE_FIELD_CORRECTED].iloc[i] <= min_value else 0
 
-        else:
-            label = 0
-
-        if i < 6 + num:
-            pass
-
-        else:
-            min_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - (6 + num) : i - 6].min()
-            max_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - (6 + num) : i - 6].max()
-            diff_entry = (
-                df[GLUCOSE_FIELD_CORRECTED].iloc[i - 6]
-                - df[GLUCOSE_FIELD_CORRECTED].iloc[i - (6 + num)]
-            )
-            row = [min_entry, max_entry, diff_entry, label]
-            entry = pd.DataFrame(data=[row], columns=names)
-            labeled = labeled.append(entry, ignore_index=True)
+        min_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - end : i - offset].min()
+        max_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - end : i - offset].max()
+        diff_entry = (
+            df[GLUCOSE_FIELD_CORRECTED].iloc[i - offset]
+            - df[GLUCOSE_FIELD_CORRECTED].iloc[i - end]
+        )
+        row = [min_entry, max_entry, diff_entry, label]
+        entry = pd.DataFrame(data=[row], columns=names)
+        labeled = labeled.append(entry, ignore_index=True)
 
     return labeled
 
@@ -168,6 +166,7 @@ def hyperparam_tuning(train_x, train_y, test_x, test_y, param_min, param_max):
     return
 
 
+# TODO(hallacy): What does all of this commented out stuff do?
 # global_std = df['Glucose Value (mg/dL)'].rolling(window = 30 // 5).std().median()
 
 # fig, ax = plt.subplots()
@@ -272,6 +271,8 @@ def hyperparam_tuning(train_x, train_y, test_x, test_y, param_min, param_max):
 def main(
     infile="CLARITY_Export_2021-01-28_222148.csv",
     split_timestamp=False,
+    seed=42,
+    test_size=0.2,
 ):
 
     df = read_csv(infile)
@@ -281,20 +282,22 @@ def main(
         df = split_timestamp(df)
 
     # calculate a 60 day rolling mean and plot
-
-    num = 5
-    labeled = create_labeled_data_two(df, num=num)
+    # TODO(hallacy): does this mean the mean over the last 60 days?  Did I miss where this was happening?
+    # TODO(hallacy): I think this function takes longer than I would expect.  We should maybe do some light profiling of the function to see if we can get speedup
+    labeled = create_min_max_labeled_data(df, width=5)
 
     # print(labeled.info())
 
-    train, test = train_test_split(labeled, test_size=0.2)
-    train_x = train.iloc[:, 0:3].astype(int)
-    test_x = test.iloc[:, 0:3].astype(int)
+    train, test = train_test_split(labeled, test_size=test_size)
 
-    train_y = train.iloc[:, 3].astype(int)
-    test_y = test.iloc[:, 3].astype(int)
+    # TODO(hallacy): remove magic strings
+    train_x = train[["Min", "Max", "Diff"]].astype(int)
+    test_x = test[["Min", "Max", "Diff"]].astype(int)
 
-    sm = SMOTE(random_state=42)
+    train_y = train[["Label"]].astype(int)
+    test_y = test[["Label"]].astype(int)
+
+    sm = SMOTE(random_state=seed)
 
     x_res, y_res = sm.fit_resample(train_x, train_y)
 
