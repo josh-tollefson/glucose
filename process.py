@@ -1,175 +1,172 @@
 import os
 import sys
+import warnings
+import fire
 
-import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-
+import pandas as pd
 from forecast import *
-import warnings
-warnings.filterwarnings('ignore', 'statsmodels.tsa.arima_model.ARMA',
-                        FutureWarning)
-warnings.filterwarnings('ignore', 'statsmodels.tsa.arima_model.ARIMA',
-                        FutureWarning)
+from imblearn.over_sampling import SMOTE
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from statsmodels.tsa.arima_model import ARIMA
 
-def read_csv(infile, cols=[1, 7], skiprows=10, col_names=['Timestamp', 'Glucose Value (mg/dL)']):
+warnings.filterwarnings("ignore", "statsmodels.tsa.arima_model.ARMA", FutureWarning)
+warnings.filterwarnings("ignore", "statsmodels.tsa.arima_model.ARIMA", FutureWarning)
 
-	df = pd.read_csv(infile, usecols=cols, skiprows=skiprows)
-	df.columns=col_names
-	df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-	
+DATE = "DATE"
+HOUR = "HOUR"
+TIMESTAMP = "TIMESTAMP"
+TIME_DIFF = "TIME_DIFF"
+GLUCOSE_FIELD_ORIG = "Glucose Value (mg/dL)"
+GLUCOSE_FIELD_CORRECTED = "Glucose Value Corrected (mg/dL)"
 
-	df['Glucose Value (mg/dL)'] = df['Glucose Value (mg/dL)'].replace({'Low': '40'})
-	df['Glucose Value (mg/dL)'] = df['Glucose Value (mg/dL)'].astype(int)
 
-	#df = split_timestamp(df)
+def read_csv(
+    infile,
+    cols=[1, 7],
+    skiprows=10,
+    col_names=[TIMESTAMP, GLUCOSE_FIELD_ORIG],
+):
+    # TODO(josh): to add docstring about the kind of file that expected here
 
-	return df
+    df = pd.read_csv(infile, usecols=cols, skiprows=skiprows)
+    df.columns = col_names
+    df[TIMESTAMP] = pd.to_datetime(df[TIMESTAMP])
+    df[GLUCOSE_FIELD_CORRECTED] = df[GLUCOSE_FIELD_ORIG]
+
+    return df
+
+
+def handle_lows(df):
+    df[GLUCOSE_FIELD_CORRECTED] = df[GLUCOSE_FIELD_ORIG].replace({"Low": "40"})
+    df[GLUCOSE_FIELD_CORRECTED] = df[GLUCOSE_FIELD_CORRECTED].astype(int)
+    return df
+
 
 def split_timestamp(df):
 
-	df['Date'] = df['Timestamp'].dt.date
-	df['Hour'] = df['Timestamp'].dt.time
+    df[DATE] = df[TIMESTAMP].dt.date
+    df[HOUR] = df[TIMESTAMP].dt.time
 
-	return df
+    return df
+
 
 def get_lows(df, low_threshold=70):
 
-	df['Time Diff'] = pd.to_timedelta(df['Timestamp'].astype(str)).diff(-1).dt.total_seconds().div(60)
+    df[TIME_DIFF] = (
+        pd.to_timedelta(df[TIMESTAMP].astype(str)).diff(-1).dt.total_seconds().div(60)
+    )
 
-	print(df.head())
-
-def create_labeled_data(df, num=10):
-
-	labeled = pd.DataFrame(columns=range(0,num+1))
-
-	for i in range(df.shape[0] // num):
-
-		if df['Glucose Value (mg/dL)'].iloc[i * num] <= 70:
-				label = 1
-
-		else:
-				label = 0
-
-		if i * num < 6 + num:
-			pass
-
-		else:
-			row = np.append(df['Glucose Value (mg/dL)'].iloc[i * num - (6+num) : i * num - 6].values, label)
-			entry = pd.DataFrame(data=[row])
-			labeled = labeled.append(entry)
-
-	return labeled
-
-def create_labeled_data_two(df, num=10):
-
-	names =['Min', 'Max', 'Diff', 'Label']
-	labeled = pd.DataFrame(columns=names)
-	for i in range(df.shape[0]):
-
-		if df['Glucose Value (mg/dL)'].iloc[i] <= 70:
-				label = 1
-
-		else:
-				label = 0
-
-		if i < 6 + num:
-			pass
-
-		else:
-			min_entry = df['Glucose Value (mg/dL)'].iloc[i - (6+num) : i - 6].min()
-			max_entry = df['Glucose Value (mg/dL)'].iloc[i - (6+num) : i - 6].max()
-			diff_entry = df['Glucose Value (mg/dL)'].iloc[i - 6] - df['Glucose Value (mg/dL)'].iloc[i - (6+num)]
-			row = [min_entry, max_entry, diff_entry, label]
-			entry = pd.DataFrame(data=[row], columns=names)
-			labeled = labeled.append(entry, ignore_index=True)
-
-	return labeled
+    print(df.head())
 
 
-def get_min_aic(ts, nr=10, nd=2, nq=10, ic='aic', plotting=True):
+# TODO(hallacy): Is there a more descriptive name
+def create_labeled_data(df, min_value=70, offset=6, width=10):
 
-		result = []
-		params = []
+    end = offset + width
+    labeled = pd.DataFrame(columns=range(0, width + 1))
 
-		for p in range(1, nr):
-			for d in range(1, nd):
-				for q in range(nq):
+    for i in range(df.shape[0] // width):
+        if i * width < end:
+            continue
 
-					try:
-						print(p, d, q)
-						model = ARIMA(ts, order=(p, d, q))  
-						result.append( getattr(model.fit(disp=-1), ic) )
-						params.append([p,d,q])
-					except ValueError: ### coeffs not invertible
-						result.append(np.inf)
-						params.append([p,d,q])						
+        if df[GLUCOSE_FIELD_CORRECTED].iloc[i * width] <= min_value:
+            label = 1
 
-		ind = np.argmin(result)
+        else:
+            label = 0
 
-		print(result[ind])
-		print(params[ind])
+        row = np.append(
+            df[GLUCOSE_FIELD_CORRECTED]
+            .iloc[i * width - end : i * width - offset]
+            .values,
+            label,
+        )
+        entry = pd.DataFrame(data=[row])
+        labeled = labeled.append(entry)
+
+    return labeled
+
+
+# TODO(hallacy): Is there a more descriptive name
+def create_min_max_labeled_data(df, min_value=70, offset=6, width=10):
+    # TODO(hallacy): Add docstring
+    # TODO(hallacy): these should be constants somewhere
+    names = ["Min", "Max", "Diff", "Label"]
+    labeled = pd.DataFrame(columns=names)
+
+    end = offset + width
+    for i in range(df.shape[0]):
+        if i < end:
+            continue
+
+        label = 1 if df[GLUCOSE_FIELD_CORRECTED].iloc[i] <= min_value else 0
+
+        min_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - end : i - offset].min()
+        max_entry = df[GLUCOSE_FIELD_CORRECTED].iloc[i - end : i - offset].max()
+        diff_entry = (
+            df[GLUCOSE_FIELD_CORRECTED].iloc[i - offset]
+            - df[GLUCOSE_FIELD_CORRECTED].iloc[i - end]
+        )
+        row = [min_entry, max_entry, diff_entry, label]
+        entry = pd.DataFrame(data=[row], columns=names)
+        labeled = labeled.append(entry, ignore_index=True)
+
+    return labeled
+
+
+def get_min_aic(ts, nr=10, nd=2, nq=10, ic="aic", plotting=True):
+
+    result = []
+    params = []
+
+    for p in range(1, nr):
+        for d in range(1, nd):
+            for q in range(nq):
+
+                try:
+                    print(p, d, q)
+                    model = ARIMA(ts, order=(p, d, q))
+                    result.append(getattr(model.fit(disp=-1), ic))
+                    params.append([p, d, q])
+                except ValueError:  ### coeffs not invertible
+                    result.append(np.inf)
+                    params.append([p, d, q])
+
+    ind = np.argmin(result)
+
+    print(result[ind])
+    print(params[ind])
+
 
 def hyperparam_tuning(train_x, train_y, test_x, test_y, param_min, param_max):
 
-	### max_depth = 6
-	### min_samples_split = unconstrained
-	### min_samples_leaf = 9
-	### n_estimators = >9
+    ### max_depth = 6
+    ### min_samples_split = unconstrained
+    ### min_samples_leaf = 9
+    ### n_estimators = >9
 
-	param_vals = range(param_min, param_max+1)
-	result = []
-	for i in param_vals:
-		model = RandomForestClassifier(max_features=i).fit(train_x, train_y)
-		report = classification_report(test_y, model.predict(test_x), output_dict=True)
-		result.append(report['1']['recall'])
+    param_vals = range(param_min, param_max + 1)
+    result = []
+    for i in param_vals:
+        model = RandomForestClassifier(max_features=i).fit(train_x, train_y)
+        report = classification_report(test_y, model.predict(test_x), output_dict=True)
+        result.append(report["1"]["recall"])
 
-	plt.plot(param_vals, result)
-	plt.show()
+    plt.plot(param_vals, result)
+    plt.show()
 
-	return
+    return
 
 
-infile = 'CLARITY_Export_2021-01-28_222148.csv'
-
-df = read_csv(infile)
-
-# calculate a 60 day rolling mean and plot
-
-num = 5
-labeled = create_labeled_data_two(df, num=num)
-
-# print(labeled.info())
-
-from sklearn.model_selection import train_test_split
-
-train, test = train_test_split(labeled, test_size=0.2)
-train_x = train.iloc[:,0:3].astype(int)
-test_x = test.iloc[:,0:3].astype(int)
-
-train_y = train.iloc[:,3].astype(int)
-test_y = test.iloc[:,3].astype(int)
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.neighbors import KNeighborsClassifier
-
-from sklearn.metrics import classification_report, confusion_matrix
-from imblearn.over_sampling import SMOTE 
-
-sm = SMOTE(random_state=42)
-
-x_res, y_res = sm.fit_resample(train_x, train_y)
-
-#hyperparam_tuning(x_res, y_res, test_x, test_y, 1, 100)
-
-model = LogisticRegression().fit(x_res, y_res)
-
-print(confusion_matrix(test_y, model.predict(test_x)))
-
-print(classification_report(test_y, model.predict(test_x)))
-
+# TODO(hallacy): What does all of this commented out stuff do?
 # global_std = df['Glucose Value (mg/dL)'].rolling(window = 30 // 5).std().median()
 
 # fig, ax = plt.subplots()
@@ -180,9 +177,6 @@ print(classification_report(test_y, model.predict(test_x)))
 # ax.legend(fontsize=12)
 
 # plt.gcf().autofmt_xdate()
-# import numpy as np, pandas as pd
-# from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-# import matplotlib.pyplot as plt
 # plt.rcParams.update({'figure.figsize':(9,7), 'figure.dpi':120})
 
 # plt.show()
@@ -220,7 +214,6 @@ print(classification_report(test_y, model.predict(test_x)))
 
 # plt.show()
 
-from statsmodels.tsa.arima_model import ARIMA
 
 # model = ARIMA(df['Glucose Value (mg/dL)'], order=(1,1,1))
 # model_fit = model.fit(disp=0)
@@ -245,8 +238,8 @@ from statsmodels.tsa.arima_model import ARIMA
 
 # # get_min_aic(train)
 
-# model = ARIMA(train, order=(1, 1, 1))  
-# fitted = model.fit(disp=0)  
+# model = ARIMA(train, order=(1, 1, 1))
+# fitted = model.fit(disp=0)
 
 # fitted.plot_predict(dynamic=False)
 # plt.show()
@@ -268,8 +261,55 @@ from statsmodels.tsa.arima_model import ARIMA
 # plt.plot(train, label='training')
 # plt.plot(test, label='actual')
 # plt.plot(fc_series, label='forecast')
-# plt.fill_between(lower_series.index, lower_series, upper_series, 
+# plt.fill_between(lower_series.index, lower_series, upper_series,
 #                  color='k', alpha=.15)
 # plt.title('Forecast vs Actuals')
 # plt.legend(loc='upper left', fontsize=8)
 # plt.show()
+
+
+def main(
+    infile="CLARITY_Export_2021-01-28_222148.csv",
+    split_timestamp=False,
+    seed=42,
+    test_size=0.2,
+):
+
+    df = read_csv(infile)
+    df = handle_lows(df)
+
+    if split_timestamp:
+        df = split_timestamp(df)
+
+    # calculate a 60 day rolling mean and plot
+    # TODO(hallacy): does this mean the mean over the last 60 days?  Did I miss where this was happening?
+    # TODO(hallacy): I think this function takes longer than I would expect.  We should maybe do some light profiling of the function to see if we can get speedup
+    labeled = create_min_max_labeled_data(df, width=5)
+
+    # print(labeled.info())
+
+    train, test = train_test_split(labeled, test_size=test_size)
+
+    # TODO(hallacy): remove magic strings
+    train_x = train[["Min", "Max", "Diff"]].astype(int)
+    test_x = test[["Min", "Max", "Diff"]].astype(int)
+
+    train_y = train[["Label"]].astype(int)
+    test_y = test[["Label"]].astype(int)
+
+    sm = SMOTE(random_state=seed)
+
+    x_res, y_res = sm.fit_resample(train_x, train_y)
+
+    # hyperparam_tuning(x_res, y_res, test_x, test_y, 1, 100)
+
+    # TODO(hallacy): These results are pretty variable.  We should probably find the source of randomness
+    model = LogisticRegression().fit(x_res, y_res)
+
+    print(confusion_matrix(test_y, model.predict(test_x)))
+
+    print(classification_report(test_y, model.predict(test_x)))
+
+
+if __name__ == "__main__":
+    fire.Fire(main)
