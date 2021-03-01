@@ -214,9 +214,7 @@ def get_processed_df(
 
     # For the case of series I got this to work I think:
     # Set all rows to same length
-    rows = rows.apply(
-        lambda row: row if len(row) == len(names) else [None] * len(names)
-    )
+    rows = rows[rows.apply(len) != 0]
     # Unpack the arrays
     rows = [x for x in rows.to_numpy()]
     features = pd.DataFrame(rows, columns=names)
