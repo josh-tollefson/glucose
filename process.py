@@ -1,4 +1,5 @@
 import os
+import glob
 import sys
 import fire
 import numpy as np
@@ -46,6 +47,22 @@ def read_csv(
 
     return df
 
+
+def merge_files(inpath):
+
+    merged = pd.DataFrame()
+
+    files = glob.glob(inpath+'*.csv')
+
+    for f in files:
+        df = read_csv(f)
+        df = df.dropna()
+        merged = merged.append(df)
+
+    merged.drop_duplicates(inplace=True)
+    merged.sort_values(by=TIMESTAMP, inplace=True)
+
+    return merged
 
 def handle_lows(df, low_val="40"):
 
@@ -233,13 +250,15 @@ def split_timestamp(df):
 
 
 def main(
-    infile="./raw/CLARITY_Export_2021-01-28_222148.csv",
-    outfile="./processed/CLARITY_Export_2021-01-28_222148_processed_series_normalized.csv",
+    inpath="./raw/",
+    outfile="./processed/CLARITY_Export_2021-01-28_222148_min30_max60.csv",
     method="series",
     normalize_data=True,
     split_timestamp=False,
+    min_time=30,
+    max_time=60
 ):
-    df = read_csv(infile)
+    df = merge_files(inpath)
     df = label_lows(df)
 
     if normalize_data:
@@ -247,7 +266,7 @@ def main(
 
     if split_timestamp:
         df = split_timestamp(df)
-    get_processed_df(df, method=method, savefile=outfile)
+    get_processed_df(df, method=method, savefile=outfile, min_time=min_time, max_time=max_time)
 
 
 if __name__ == "__main__":
