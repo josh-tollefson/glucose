@@ -72,19 +72,48 @@ def handle_lows(df, low_val="40"):
     return df
 
 
-def normalize(df):
+def log_transform(df, plot=False):
+    """
+    Glucose data are right-skewed, so apply log transform and then standardize
+    INPUTS: df, dataframe
+            plot, bool
+    OUTPUT:
+            df, dataframe
+    """
+
+    if plot:
+        df.hist(column = GLUCOSE_FIELD_ORIG) 
+
+    df[GLUCOSE_FIELD_ORIG] = np.log(df[GLUCOSE_FIELD_ORIG])
+
+    return df
+
+def normalize(df, method='normalize'):
     """
     Normalize df Glucose Values col between 0 and 1
     INPUTS: df, dataframe
+            method, str ('normalize' or 'standardize')
     OUTPUT: df, dataframe
     """
 
-    min_glucose = df[GLUCOSE_FIELD_ORIG].min()
-    max_glucose = df[GLUCOSE_FIELD_ORIG].max()
+    if method == 'normalize':
 
-    df[GLUCOSE_FIELD_ORIG] = (df[GLUCOSE_FIELD_ORIG] - min_glucose) / (
-        max_glucose - min_glucose
-    )
+        min_glucose = df[GLUCOSE_FIELD_ORIG].min()
+        max_glucose = df[GLUCOSE_FIELD_ORIG].max()
+
+        df[GLUCOSE_FIELD_ORIG] = (df[GLUCOSE_FIELD_ORIG] - min_glucose) / (
+            max_glucose - min_glucose
+        )
+
+    elif method == 'standardize':
+
+        avg_glucose = df[GLUCOSE_FIELD_ORIG].mean()
+        std_glucose = df[GLUCOSE_FIELD_ORIG].std()
+
+        df[GLUCOSE_FIELD_ORIG] = (df[GLUCOSE_FIELD_ORIG] - avg_glucose) / std_glucose
+
+    else:
+        print('No valid method')
 
     return df
 
@@ -110,9 +139,9 @@ def get_processed_series(
     ].to_numpy()
 
     # Reverse time order in order to do interpolation of missing values
-    rows[::-1, 0] = [(cur_timestamp - t).total_seconds() // 60 for t, g, l in rows]
+    rows[:, 0] = [(cur_timestamp - t).total_seconds() // 60 for t, g, l in rows]
 
-    if rows.shape[0] <= 1:
+    if rows.shape[0] <= 2:
         return []
 
     else:
@@ -249,9 +278,10 @@ def split_timestamp(df):
 
 def main(
     inpath="./raw/",
-    outfile="./processed/CLARITY_Export_2021-01-28_222148_min30_max60.csv",
+    outfile="./processed/CLARITY_Export_2021-03-01_min30_max60.csv",
     method="series",
-    normalize_data=True,
+    transform_data=True,
+    normalize_data='standardize',
     split_timestamp=False,
     min_time=30,
     max_time=60
@@ -259,8 +289,11 @@ def main(
     df = merge_files(inpath)
     df = label_lows(df)
 
-    if normalize_data:
-        df = normalize(df)
+    if transform_data:
+        df = log_transform(df)
+
+    if normalize_data != False:
+        df = normalize(df, method=normalize_data)
 
     if split_timestamp:
         df = split_timestamp(df)
