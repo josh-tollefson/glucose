@@ -5,6 +5,8 @@ This work processes data from glucose monitoring devices and uses ML classifiers
 
 The data shared in this repository is my own. I welcome other diabetics to clone this repo and use their own data to see whether this model works for them!
 
+Read about this project in more detail [here](https://josh-tollefson.github.io/2021-10-19-glucose-monitoring/)
+
 ### Running the Model
 Install requirements with 
 ```
