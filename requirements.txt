@@ -1,7 +1,6 @@
 pandas
 matplotlib
-forecast
+seaborn
 sklearn
-imblearn
 statsmodels
 fire

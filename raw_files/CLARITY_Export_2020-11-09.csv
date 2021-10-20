@@ -1,6 +1,6 @@
 ﻿Index,Timestamp (YYYY-MM-DDThh:mm:ss),Event Type,Event Subtype,Patient Info,Device Info,Source Device ID,Glucose Value (mg/dL),Insulin Value (u),Carb Value (grams),Duration (hh:mm:ss),Glucose Rate of Change (mg/dL/min),Transmitter Time (Long Integer),Transmitter ID
-1,,FirstName,,XXXXXX,,,,,,,,
-2,,LastName,,XXXXXX,,,,,,,,
+1,,FirstName,,,,,,,,,,
+2,,LastName,,,,,,,,,,
 3,,Device,,,Dexcom G6 Mobile App,Android G6,,,,,,
 4,,Alert,Fall,,,Android G6,,,,,3,
 5,,Alert,High,,,Android G6,260,,,,,
